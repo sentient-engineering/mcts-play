@@ -1,30 +1,45 @@
-import random 
+import random
 import math
-import time 
 
-class TicTacToe: 
-    def __init__(self) -> None:
-        self.board = ['.' for _ in range(9)]
+class TicTacToe:
+    def __init__(self):
+        self.board = tuple('.' for _ in range(9))
         self.current_player = 'X'
 
-    def get_possible_moves(self):
-        return [i for i, spot in enumerate(self.board) if spot == '.']
-
-    def make_move(self, move): 
-        if self.board[move] == '.': 
-            self.board[move] = self.current_player
+    def make_move(self, move):
+        if self.board[move] == '.':
+            new_board = list(self.board)
+            new_board[move] = self.current_player
+            self.board = tuple(new_board)
             self.current_player = 'O' if self.current_player == 'X' else 'X'
-        else: 
-            raise ValueError("Invalid Error")
+        else:
+            raise ValueError("Invalid move")
 
-    def is_terminal(self): 
+    def clone(self):
+        new_game = TicTacToe()
+        new_game.board = self.board
+        new_game.current_player = self.current_player
+        return new_game
+
+    def __hash__(self):
+        return hash((self.board, self.current_player))
+
+    def __eq__(self, other):
+        if isinstance(other, TicTacToe):
+            return self.board == other.board and self.current_player == other.current_player
+        return False
+
+    def __str__(self):
+        return '\n'.join(' '.join(self.board[i:i+3]) for i in (0, 3, 6))
+
+    def is_terminal(self):
         return self.get_winner() is not None or '.' not in self.board
 
-    def get_winner(self): 
+    def get_winner(self):
         lines = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8],  # rows
-            [0, 3, 6], [1, 4, 7], [2, 5, 8],  # columns
-            [0, 4, 8], [2, 4, 6]  # diagonals
+            (0, 1, 2), (3, 4, 5), (6, 7, 8),
+            (0, 3, 6), (1, 4, 7), (2, 5, 8),
+            (0, 4, 8), (2, 4, 6)
         ]
         for line in lines:
             if self.board[line[0]] == self.board[line[1]] == self.board[line[2]] != '.':
@@ -33,93 +48,137 @@ class TicTacToe:
             return 'Tie'
         return None
 
-    def get_result(self, player): 
+    def get_possible_moves(self):
+        return [i for i, cell in enumerate(self.board) if cell == '.']
+
+    def get_reward(self, player):
         winner = self.get_winner()
-        if winner == player: 
-            return 1 
-        elif winner == 'Tie': 
-            return 0.5
+        print("getRewards")
+        print(winner)
+        print(player)
+        if winner == 'O':
+            return 5
+        elif winner == 'Tie':
+            return 4
+        elif winner is None: 
+            return 1
         else:
-            return 0
+            return -10000
 
-    def clone(self): 
-        new_game = TicTacToe() 
-        new_game.board = self.board.copy() 
-        new_game.current_player = self.current_player
-        return new_game
-
-    def __str__(self) -> str:
-        return '\n'.join(' '.join(self.board[i:i+3]) for i in (0, 3, 6)) 
-
-class Node: 
-    def __init__(self, game: TicTacToe, move=None, parent=None) -> None:
+class MCTSNode:
+    def __init__(self, game, parent=None, move=None):
         self.game = game
-        self.move = move
         self.parent = parent
+        self.move = move
         self.children = []
-        self.visits = 0 
-        self.score = 0 
+        self.visits = 0
+        self.value = 0
 
-def expand(node: Node): 
-    moves = node.game.get_possible_moves()
-    for move in moves: 
-        new_game = node.game.clone()
-        new_game.make_move(move)
-        new_node = Node(new_game, move, node)
-        node.children.append(new_node)
+    def is_fully_expanded(self):
+        return len(self.children) == len(self.game.get_possible_moves())
 
-    return random.choice(node.children)
+    def select_child(self, exploration_weight):
+        log_n_parent = math.log(self.visits)
+        def uct(child):
+            if child.visits == 0:
+                return float('inf')
+            return child.value / child.visits + exploration_weight * math.sqrt(log_n_parent / child.visits)
+        return max(self.children, key=uct)
 
-def uct_select(node: Node): 
-    return max(node.children, key=lambda node: uct_value(node))
+    def expand(self):
+        move = random.choice([m for m in self.game.get_possible_moves() if not any(child.move == m for child in self.children)])
+        child_game = self.game.clone()
+        child_game.make_move(move)
+        child_node = MCTSNode(child_game, parent=self, move=move)
+        self.children.append(child_node)
+        return child_node
 
-def uct_value(node: Node): 
-    if node.visits == 0: 
-        return float('inf')
-    return node.score / node.visits + math.sqrt(2 * math.log(node.parent.visits) / node.visits)
+    def simulate(self):
+        print('Simulating')
+        game = self.game.clone()
+        visualize_board(game)
+        while not game.is_terminal():
+            move = random.choice(game.get_possible_moves())
+            game.make_move(move)
+            visualize_board(game)
+        
+        reward =  game.get_reward(self.game.current_player)
+        print(f'Done simulating. Reward is : {reward}')
+        return reward
 
-def select(node: Node): 
-    while not node.game.is_terminal(): 
-        if not node.children: 
-            return expand(node)
-        node = uct_select(node)
+    def backpropagate(self, result):
+        self.visits += 1
+        self.value += result
+        if self.parent:
+            self.parent.backpropagate(result)
 
-    return node 
+class MCTS:
+    def __init__(self, exploration_weight=1):
+        self.exploration_weight = exploration_weight
 
-def rollout(game: TicTacToe): 
-    current_game = game.clone()
-    while not current_game.is_terminal(): 
-        move = random.choice(current_game.get_possible_moves())
-        current_game.make_move(move)
+    def choose(self, root):
 
-    return current_game.get_result(game.current_player)
+        def score(n):
+            if n.visits == 0:
+                return float("-inf")  # avoid unseen moves
+            return n.value / n.visits  # average reward
 
-def backpropogate(node: Node, score):
-    while node: 
-        node.visits += 1 
-        node.score += score
-        node = node.parent
-        score = 1 - score
+        return max(root.children, key=score).move
 
-def get_best_move(node: Node): 
-    return max(node.children, key=lambda node : node.visits).move 
+    def select(self, node):
+        while not node.game.is_terminal():
+            if not node.is_fully_expanded():
+                return node.expand()
+            node = node.select_child(self.exploration_weight)
+        return node
 
-def mcts(root: Node, iterations, time_limit): 
-    end_time = time.time() + time_limit
-    for _ in range(iterations): 
-        if time.time() > end_time: 
-            break
+    def rollout(self, root):
+        for _ in range(100):  # number of iterations
+            node = self.select(root)
+            result = node.simulate()
+            node.backpropagate(result)
 
-        leaf = select(root)
-        score = rollout(leaf.game)
-        backpropogate(leaf, score)
+    
+    def get_stats(self, root):
+        stats = {}
+        for child in root.children:
+            stats[child.move] = {
+                'Q': child.value,
+                'N': child.visits,
+                'p': root.visits,
+                'UCT': child.value / child.visits + self.exploration_weight * math.sqrt(math.log(root.visits) / child.visits) if child.visits > 0 else float('inf')
+            }
+        return stats
 
-    return get_best_move(root)
 
-def play_game(human_player='X', time_limit=10): 
+def visualize_board(game):
+    board = game.board
+    print("┌───┬───┬───┐")
+    for i in range(0, 9, 3):
+        print(f"│ {board[i]} │ {board[i+1]} │ {board[i+2]} │")
+        if i < 6:
+            print("├───┼───┼───┤")
+    print("└───┴───┴───┘")
+
+def visualize_mcts_stats(stats):
+    print("\nMCTS Move Statistics:")
+    print("┌─────┬──────┬──────┬──────┬──────┬──────┐")
+    print("│ Move│   Q  │   N  │  Q/N │  p   │  UCT │")
+    print("├─────┼──────┼──────┼──────┼──────┼──────┤")
+    for move, data in stats.items():
+        q_n_ratio = data['Q'] / data['N'] if data['N'] > 0 else 0
+        print(f"│  {move}  │{data['Q']:5.2f} │{data['N']:5d} │{q_n_ratio:.4f}│{data['p']:5d} │{data['UCT']:5.4f} │")
+    print("└─────┴──────┴──────┴──────┴──────┴──────┘")
+
+def play_game(human_player='X'):
     game = TicTacToe()
-    while not game.is_terminal(): 
-        print(f"\nCurrent board:\n{game}")
+    tree = MCTS()
+    move_counter = 0
+
+    while not game.is_terminal():
+        print(f"\nMove {move_counter}")
+        visualize_board(game)
+
         if game.current_player == human_player:
             while True:
                 try:
@@ -128,19 +187,27 @@ def play_game(human_player='X', time_limit=10):
                     break
                 except ValueError:
                     print("Invalid move. Try again.")
-        else: 
+        else:
             print("AI is thinking...")
-            root = Node(game)
-            move = mcts(root, iterations=10000, time_limit=time_limit)
+            root = MCTSNode(game)
+            tree.rollout(root)
+
+            stats = tree.get_stats(root)
+            visualize_mcts_stats(stats)
+
+            move = tree.choose(root)
             game.make_move(move)
             print(f"AI chose move: {move}")
 
-    print(f"\n Final board:\n{game}")
+        move_counter += 1
+
+    print("\nFinal board:")
+    visualize_board(game)
     winner = game.get_winner()
-    if winner == 'Tie': 
-        print("Its a tie!")
-    else: 
+    if winner == 'Tie':
+        print("It's a tie!")
+    else:
         print(f"Player {winner} wins!")
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     play_game()

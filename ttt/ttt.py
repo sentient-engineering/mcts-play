@@ -76,11 +76,40 @@ class TicTacToeBoard(_TTTB, Node):
             + "\n"
         )
 
+def visualize_board(board):
+    to_char = lambda v: ("X" if v is True else ("O" if v is False else " "))
+    print("┌───┬───┬───┐")
+    for i in range(3):
+        row = [to_char(board.tup[3*i + j]) for j in range(3)]
+        print(f"│ {row[0]} │ {row[1]} │ {row[2]} │")
+        if i < 2:
+            print("├───┼───┼───┤")
+    print("└───┴───┴───┘")
+
+def visualize_mcts_stats(tree, board):
+    print("\nMCTS Move Statistics:")
+    print("┌─────┬──────┬──────┬──────┐")
+    print("│ Move│   Q  │   N  │  UCT │")
+    print("├─────┼──────┼──────┼──────┤")
+    
+    children = board.find_children()
+    total_n = sum(tree.N[child] for child in children)
+    
+    for i, child in enumerate(children):
+        move = [i for i, (old, new) in enumerate(zip(board.tup, child.tup)) if old != new][0]
+        q = tree.Q[child]
+        n = tree.N[child]
+        uct = q/n + tree.exploration_weight * ((total_n / n) ** 0.5) if n > 0 else float('inf')
+        print(f"│  {move}  │{q:5.2f} │{n:5d} │{uct:5.2f} │")
+    
+    print("└─────┴──────┴──────┴──────┘")
+
 
 def play_game():
     tree = MCTS()
     board = new_tic_tac_toe_board()
     print(board.to_pretty_string())
+    visualize_board(board)
     while True:
         row_col = input("enter row,col: ")
         row, col = map(int, row_col.split(","))
@@ -95,9 +124,11 @@ def play_game():
         # Here, we train as we go, doing fifty rollouts each turn.
         for _ in range(50):
             tree.do_rollout(board)
+        visualize_mcts_stats(tree, board)
         board = tree.choose(board)
         print(board.to_pretty_string())
         if board.terminal:
+            visualize_board(board)
             break
 
 

@@ -74,6 +74,8 @@ class MCTS:
             node = node.find_random_child()
             invert_reward = not invert_reward
 
+
+
     def _backpropagate(self, path, reward):
         "Send the reward back up to the ancestors of the leaf"
         for node in reversed(path):
